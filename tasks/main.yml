@@ -1,0 +1,5 @@
+---
+- name: Include_tasks
+  include_tasks: use/__detect_init_system.yml
+- name: Include_tasks
+  include_tasks: "{{ ansible_distribution | lower }}{{ ansible_distribution_major_version }}.yml"

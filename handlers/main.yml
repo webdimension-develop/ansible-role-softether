@@ -1,0 +1,8 @@
+---
+# handlers file for sa-vpn-softether
+- name: Restart firewalld
+  become: true
+  systemd:
+    state: restarted
+    name: firewalld
+    enabled: true

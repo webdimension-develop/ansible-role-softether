@@ -1,0 +1,82 @@
+---
+# defaults file for sa-vpn-softether
+
+role_dir: "{{ role_path }}"
+
+softether_version: "4.34-9745-beta"
+# dummy why would download link contain build date?
+softether_version_date: "2020.04.05"
+
+# set true to add {{softether_home}} to PATH env via /etc/profile.d/softether.sh
+option_add_to_path: false
+
+# SecureNAT is a combination of Virtual NAT and DHCP Server function. You can enable SecureNAT using the command below:
+softether_option_securenat: true
+softether_option_bridge: false
+
+softether_location: /opt
+softether_home: "{{ softether_location }}/vpnserver"
+softether_lang: en
+softether_fqdn: "{{ ansible_host }}"
+
+
+# ============== IPSEC ===================
+softether_option_ipsec: true
+softether_ipsec_l2tp: true
+softether_ipsec_l2tpraw: true
+softether_ipsec_etherip: false
+softether_ipsec_presharedkey: "{{ secret.softether_ipsec_presharedkey }}"
+# /============== IPSEC ===================
+
+# ============== OPENVPN ===================
+softether_option_openvpn: true
+softether_openvpn_port: 1194
+softether_openvpn_config: "{{ softether_home }}/generated/openvpn_config.zip"
+# /============== OPENVPN ===================
+
+# ============== Bridge ===================
+softether_bridge_device: soft
+softether_bridge_tap: false
+# ============== /Bridge ===================
+
+
+softether_sysctl_conf_lines:
+  - {
+    name: 'net.ipv4.ip_forward',
+    value: '1'
+  }
+
+
+# =========== INIT SCENARIONS ===============
+
+softether_init_script: scenarios/create_hub
+
+# ============== Administrator ===================
+softether_administrator_password: "{{ secret.softether_administrator_password }}"
+
+# ============== Users ===================
+softether_vpn_users: "{{ secret.softether_vpn_users }}"
+# ============== /Users ===================
+# =========== INIT SCENARIONS ===============
+
+
+# softether_download_url: "http://www.softether-download.com/files/softether/v4.20-9608-rtm-2016.04.17-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v4.20-9608-rtm-2016.04.17-linux-x64-64bit.tar.gz"
+softether_download_url: "https://www.softether-download.com/files/softether/v4.41-9787-rtm-2023.03.14-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v4.41-9787-rtm-2023.03.14-linux-x64-64bit.tar.gz"
+
+
+firewalld_service:
+  - service: 'ipsec'
+    zone: 'public'
+    permanent: 'yes'
+    state: 'enabled'
+    immediate: true
+  - service: 'openvpn'
+    zone: 'public'
+    permanent: 'yes'
+    state: 'enabled'
+    immediate: true
+
+firewalld_ports:
+  - port: "{{ softether_openvpn_port }}/tcp"
+    permanent: "yes"
+    state: "enabled"

@@ -1,0 +1,311 @@
+---
+# tasks file for sa-vpn-softether
+
+- name: Install make
+  become: true
+  dnf:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - make
+    - readline-devel
+    - ncurses-devel
+    - openssl-devel
+    - "@Development tools"
+
+- name: SoftEther | Check vpnserver presence
+  command: test -x {{ softether_home }}/vpnserver
+  ignore_errors: true
+  changed_when: false
+  register: vpnserver_present
+  tags:
+    - softether
+
+- name: SoftEther | allow to reenter make process - reset folder
+  become: true
+  file:
+    path: "{{ softether_home }}"
+    state: "absent"
+  when: vpnserver_present is failed
+  tags:
+    - softether
+
+- name: SoftEther | Ensure target directory exists
+  become: true
+  file:
+    path: "{{ softether_home }}"
+    state: "directory"
+  when: vpnserver_present is failed
+  tags:
+    - softether
+
+- name: SoftEther | Ensure scenarios directory exists
+  become: true
+  file:
+    path: "{{ softether_home }}/scenarios"
+    state: "directory"
+  when: vpnserver_present is failed
+  tags:
+    - softether
+
+- name: SoftEther | Ensure scenarios directory exists
+  become: true
+  file:
+    path: "{{ softether_home }}/generated"
+    state: "directory"
+  when: vpnserver_present is failed
+  tags:
+    - softether
+
+
+- name: SoftEther | Download distribution
+  become: true
+  get_url:
+    url: "http://www.softether-download.com/files/softether/v4.20-9608-rtm-2016.04.17-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v4.20-9608-rtm-2016.04.17-linux-x64-64bit.tar.gz"
+    dest: "/tmp/softether.tar.gz"
+  tags:
+    - softether
+
+
+- name: SoftEther | unarchive
+  become: true
+  unarchive:
+    src: "/tmp/softether.tar.gz"
+    dest: "{{ softether_location }}"
+    remote_src: true
+  when: vpnserver_present is failed
+  tags:
+    - softether
+
+- name: SoftEther | make
+  shell: yes 1 | make
+  when: vpnserver_present is failed
+  args:
+    chdir: "{{ softether_home }}"
+  tags:
+    - softether
+
+
+- name: SoftEther | configure lang.config
+  become: true
+  lineinfile:
+    dest: "{{ softether_home }}/lang.config"
+    regexp: ^(en|ja|cn)$
+    line: "{{ softether_lang }}"
+    create: true
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | install init script
+  become: true
+  template:
+    src: "{{ role_dir }}/templates/startup/vpnserver.init.j2"
+    dest: /etc/init.d/vpnserver
+    mode: "0755"
+  when: upstart_system == "upstart"
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | install init script
+  become: true
+  template:
+    src: "{{ role_dir }}/templates/startup/vpnserver.service.j2"
+    dest: /etc/systemd/system/vpnserver.service
+    mode: "0755"
+  when: upstart_system == "systemd"
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Reset configuration (1/4)
+  become: true
+  service:
+    name: "vpnserver"
+    enabled: true
+    state: stopped
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Reset configuration (2/4)
+  become: true
+  file:
+    path: "{{ softether_home }}/vpn_server.config"
+    state: "absent"
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Keys in sysctl.conf (3/4)
+  become: true
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    ignoreerrors: true
+    state: "{{ item.state | default('present') }}"
+    reload: true
+  with_items: "{{ softether_sysctl_conf_lines | default() }}"
+  tags:
+    - softether
+
+- name: SoftEther | Reset configuration (4/4)
+  become: true
+  service:
+    name: "vpnserver"
+    enabled: true
+    state: started
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Template unattended setup (builtin)
+  become: true
+  template:
+    src: "{{ role_dir }}/templates/scenarios/{{ item }}"
+    dest: "{{ softether_home }}/scenarios/{{ item }}"
+  with_items:
+    - create_hub
+    - check
+  tags:
+    - softether
+
+- name: SoftEther | Check configuration
+  become: true
+  command: ./vpncmd localhost /tools /IN:scenarios/check
+  args:
+    chdir: "{{ softether_home }}"
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Proceed with setup
+  command: ./vpncmd localhost /server /IN:{{ softether_init_script }}
+  args:
+    chdir: "{{ softether_home }}"
+  become: true
+  changed_when: false
+  tags:
+    - softether
+
+- name: SoftEther | Restart service
+  become: true
+  service:
+    name: "vpnserver"
+    enabled: true
+    state: started
+  changed_when: false
+  tags:
+    - softether
+
+
+- name: Ssh debbug
+  debug:
+    msg: "Copy artifacts as scp {{ ansible_ssh_user | default('youruser') }}@{{ ansible_ssh_host | default('yourhost') }}:{{ softether_home }}/generated/* ."
+
+- name: Download SoftEther Artifacts
+  become: true
+  ansible.posix.synchronize:
+    mode: pull
+    src: "{{ softether_home }}/generated"
+    dest: "{{ playbook_dir }}/generated"
+#  ignore_errors: true
+  failed_when: false
+  tags:
+    - openvpn
+
+- name: SoftEther | Add softether_home to path
+  become: true
+  lineinfile:
+    dest: /etc/profile.d/softether.sh
+    state: present
+    create: true
+    regexp: '^export PATH'
+    line: 'export PATH=$PATH:{{ softether_home }}'
+  when: option_add_to_path
+  tags:
+    - softether
+
+- name: SoftEther | install python-pip
+  become: true
+  dnf:
+    name: python-pip
+    state: present
+
+- name: SoftEther | upgrade pip
+  become: true
+  command: pip install --upgrade pip
+  changed_when: false
+  when: vpnserver_present is failed
+
+- name: SoftEther | pip install pexpect
+  become: true
+  command: pip install pexpect
+  changed_when: false
+
+- name: Install expect
+  become: true
+  dnf:
+    name: expect
+    state: installed
+
+- name: SoftEther | Set Administrator pssword
+  become: true
+  shell: |
+    cd "{{ softether_home }}"
+    expect -c "
+    spawn \"./vpncmd\"
+    expect \"Select 1, 2 or 3:\"
+    send \"1\n\"
+    expect \"Hostname of IP Address of Destination:\"
+    send \"\n\"
+    expect \"Specify Virtual Hub Name:\"
+    send \"\n\"
+    expect \"VPN Server>\"
+    send \"ServerPasswordSet\n\"
+    expect \"Password:\"
+    send \"{{ softether_administrator_password }}\n\"
+    expect \"Confirm input:\"
+    send \"{{ softether_administrator_password }}\n\"
+    expect \"VPN Server>\"
+    send \"exit\n\"
+    "
+  when: vpnserver_present is failed
+  tags:
+    - softether
+    - set_admin_pass
+
+- name: Open service by firewalld
+  become: true
+  ansible.posix.firewalld:
+    zone: "{{ item.zone }}"
+    service: "{{ item.service }}"
+    permanent: "{{ item.permanent }}"
+    state: "{{ item.state }}"
+    immediate: "{{ item.immediate }}"
+  with_items: "{{ firewalld_service }}"
+  when: firewalld_service is defined
+  notify: Restart firewalld
+
+- name: Open port by firewalld
+  become: true
+  ansible.posix.firewalld:
+    port: "{{ item.port }}"
+    permanent: "{{ item.permanent }}"
+    state: "{{ item.state }}"
+  with_items: "{{ firewalld_ports }}"
+  when: firewalld_ports is defined
+  notify: Restart firewalld
+
+- name: Firewalld rich_rule setting
+  become: true
+  ansible.posix.firewalld:
+    rich_rule: 'rule family=ipv4 source address="{{ item.1 }}" port port="{{ item.0.port }}" protocol="{{ item.0.protocol }}" "{{ item.0.control }}"'
+    permanent: true
+    state: enabled
+  with_subelements:
+    - "{{ firewalld_rich_rules }}"
+    - ips
+  when: firewalld_rich_rules is defined
+  notify: Restart firewalld
