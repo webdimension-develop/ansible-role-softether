@@ -29,11 +29,10 @@
   roles:
 
      - {
-        role: "sa-vpn-softether"
+        role: "ansible-role-softether"
        }
 
 
   tasks:
 
     - debug: msg="Tasks section"
-
